@@ -1,0 +1,33 @@
+---
+description: 用户提出数据分析类需求时，必须走 agent-loop 闭环，禁止主 Agent 直连查库作答
+alwaysApply: true
+---
+
+# Agent-Loop 强制路由
+
+## 必须走闭环
+
+当用户问题属于**数据分析 / 业务洞察**（对比、趋势、归因、分群、假设等），主 Agent **必须**按 `agent-loop` Skill 执行，**禁止**跳过 subagent 直接用 MySQL MCP 查数并回复。
+
+典型触发语（含但不限于）：
+- 「最近/近半年/本月…销售/订单/转化…情况/怎么样/涨还是跌」
+- 「为什么…下降/增长」「哪个…更好/最高」「同比/环比」
+- 「帮我看看…」「分析一下…」「预测…」
+
+## 主 Agent 禁止行为
+
+- ❌ 不创建 task-board 看板就直接 `execute_query` 并输出分析报告
+- ❌ 不委派 `planner-agent` / `builder-agent` / `verifier-agent` 就给出最终结论
+- ❌ 用户未明确说「跳过流程/直接查」时，自行判断「这题简单」而绕过闭环
+
+## 主 Agent 必须行为
+
+1. 识别为分析需求 → 读取并遵循 `.cursor/skills/agent-loop/SKILL.md`
+2. `create_task` 创建看板
+3. `Task(planner-agent)` → `Task(builder-agent)` → `Task(verifier-agent)`
+4. verifier 内部负责回修循环（`request_rework` + `Task(builder-agent)`，最多 2 轮）
+5. 仅在校验通过后，向用户呈现 builder 产出的分析报告
+
+## 例外
+
+仅当用户**明确**要求「不要走 agent-loop / 直接查 / 跳过验收」时，才可直连 MySQL MCP。

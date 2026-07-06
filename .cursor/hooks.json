@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterFileEdit": [
+      {
+        "command": "cmd /c \".cursor\\hooks\\run_hook.cmd after_file_edit.py\"",
+        "timeout": 15
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "cmd /c \".cursor\\hooks\\run_hook.cmd before_shell_execution.py\"",
+        "timeout": 10
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "cmd /c \".cursor\\hooks\\run_hook.cmd before_mcp_execution.py\"",
+        "timeout": 10
+      },
+      {
+        "command": "cmd /c \".cursor\\hooks\\run_hook.cmd before_mcp_analysis_audit.py\"",
+        "timeout": 10
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "cmd /c \".cursor\\hooks\\run_hook.cmd before_submit_prompt.py\"",
+        "timeout": 10
+      },
+      {
+        "command": "cmd /c \".cursor\\hooks\\run_hook.cmd before_submit_analysis.py\"",
+        "timeout": 10
+      }
+    ]
+  }
+}

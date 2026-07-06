@@ -1,0 +1,1 @@
+2026-07-01 21:32:29	aggregate	aop_ysl_202501_202509	mysql-local	execute_query	SELECT Mall, SUM(Final Price) FROM aop_ysl_202501_202509 GROUP BY Mall
