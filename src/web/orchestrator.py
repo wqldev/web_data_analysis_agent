@@ -14,9 +14,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src" / "mcp"))
 sys.path.insert(0, str(ROOT / "src"))
 
-from core.config_store import apply_config, load_config  # noqa: E402
 from core.intent import AnalysisType, classify_intent  # noqa: E402
-from core import mysql_client  # noqa: E402
+from core import sqlite_client  # noqa: E402
 import task_board_server as board  # noqa: E402
 
 PHASE_LABELS = {
@@ -106,12 +105,11 @@ class AgentLoopOrchestrator:
     def _emit(self, board_id: str, phase: str, detail: str = "", extra: dict | None = None):
         self.on_progress(phase, detail, {"board_id": board_id, **(extra or {})})
 
-    def run(self, requirement: str) -> dict[str, Any]:
-        apply_config(load_config())
+    def run(self, requirement: str, board_id: str | None = None) -> dict[str, Any]:
         analysis_type, type_label = classify_intent(requirement)
 
         self._emit("", "planning", "planner-agent 正在拆解任务…")
-        plan = self._run_planner(requirement, analysis_type, type_label)
+        plan = self._run_planner(requirement, analysis_type, type_label, board_id)
         board_id = plan["board_id"]
 
         self._emit(board_id, "building", "builder-agent 正在探库取数…")
@@ -139,8 +137,9 @@ class AgentLoopOrchestrator:
         requirement: str,
         analysis_type: AnalysisType,
         type_label: str,
+        existing_board_id: str | None = None,
     ) -> dict[str, Any]:
-        board_id = str(uuid.uuid4())
+        board_id = existing_board_id or str(uuid.uuid4())
         empty_board = {
             "board_id": board_id,
             "requirement": requirement,
@@ -239,7 +238,7 @@ class AgentLoopOrchestrator:
         type_label: str,
         plan: dict[str, Any],
     ) -> dict[str, Any]:
-        tables = mysql_client.list_tables()
+        tables = sqlite_client.list_tables()
         t1_content = self._build_t1(tables, analysis_type)
         board.append_result(board_id, "T1", "builder-agent", t1_content, set_status="completed")
         board.complete_task(board_id, "T1")
@@ -258,7 +257,7 @@ class AgentLoopOrchestrator:
         schema_notes = []
         for table in tables[:6]:
             try:
-                cols = mysql_client.describe_table(table)
+                cols = sqlite_client.describe_table(table)
                 col_names = [c["Field"] for c in cols]
                 schema_notes.append(f"- `{table}`: {', '.join(col_names[:8])}{'…' if len(col_names) > 8 else ''}")
             except Exception:
@@ -305,7 +304,7 @@ class AgentLoopOrchestrator:
         )
 
     def _get_date_range(self) -> tuple[str, str]:
-        rows = mysql_client.execute_query(
+        rows = sqlite_client.execute_query(
             "SELECT MIN(order_date) AS min_date, MAX(order_date) AS max_date "
             "FROM orders WHERE order_status = 'Completed'"
         )
@@ -313,7 +312,7 @@ class AgentLoopOrchestrator:
             today = datetime.now().strftime("%Y-%m-%d")
             return today, today
         max_date = str(rows[0]["max_date"])[:10]
-        start_rows = mysql_client.execute_query(
+        start_rows = sqlite_client.execute_query(
             f"SELECT DATE_FORMAT(DATE_SUB('{max_date}', INTERVAL 6 MONTH), '%Y-%m-%d') AS start_date"
         )
         start_date = str(start_rows[0]["start_date"])[:10]
@@ -351,7 +350,7 @@ class AgentLoopOrchestrator:
         JOIN order_items oi ON o.order_id = oi.order_id
         WHERE {base_filter}
         """
-        kpi_rows = mysql_client.execute_query(kpi_sql)
+        kpi_rows = sqlite_client.execute_query(kpi_sql)
         kpi = kpi_rows[0] if kpi_rows else {}
 
         detail_sql = f"""
@@ -364,10 +363,10 @@ class AgentLoopOrchestrator:
         GROUP BY DATE_FORMAT(o.order_date, '%Y-%m')
         ORDER BY month
         """
-        detail_rows = mysql_client.execute_query(detail_sql)
+        detail_rows = sqlite_client.execute_query(detail_sql)
         detail_label = "月度趋势"
 
-        prev_start_rows = mysql_client.execute_query(
+        prev_start_rows = sqlite_client.execute_query(
             f"SELECT DATE_FORMAT(DATE_SUB('{start_date}', INTERVAL 6 MONTH), '%Y-%m-%d') AS prev_start"
         )
         prev_start = str(prev_start_rows[0]["prev_start"])[:10]
@@ -379,7 +378,7 @@ class AgentLoopOrchestrator:
         WHERE o.order_date >= '{prev_start}' AND o.order_date < '{start_date}'
           AND o.order_status = 'Completed'
         """
-        prev_rows = mysql_client.execute_query(prev_sql)
+        prev_rows = sqlite_client.execute_query(prev_sql)
         prev = prev_rows[0] if prev_rows else {"prev_sales": 0, "prev_orders": 0}
 
         data = {
@@ -425,7 +424,7 @@ class AgentLoopOrchestrator:
         FROM orders o JOIN order_items oi ON o.order_id = oi.order_id
         WHERE {base_filter}
         """
-        kpi = mysql_client.execute_query(kpi_sql)[0]
+        kpi = sqlite_client.execute_query(kpi_sql)[0]
 
         detail_sql = f"""
         SELECT p.category,
@@ -439,7 +438,7 @@ class AgentLoopOrchestrator:
         GROUP BY p.category
         ORDER BY sales_amt DESC
         """
-        detail_rows = mysql_client.execute_query(detail_sql)
+        detail_rows = sqlite_client.execute_query(detail_sql)
 
         data = {
             "start_date": start_date,
@@ -501,7 +500,7 @@ class AgentLoopOrchestrator:
           CASE churn_risk WHEN '高流失风险' THEN 1 WHEN '中流失风险' THEN 2 WHEN '从未下单' THEN 3 ELSE 4 END,
           days_since_last DESC
         """
-        customer_rows = mysql_client.execute_query(churn_sql)
+        customer_rows = sqlite_client.execute_query(churn_sql)
 
         region_sql = f"""
         WITH ref AS (SELECT MAX(order_date) AS max_dt FROM orders WHERE order_status = 'Completed'),
@@ -520,11 +519,11 @@ class AgentLoopOrchestrator:
         FROM cust GROUP BY region ORDER BY high_risk DESC
         """
         try:
-            region_rows = mysql_client.execute_query(region_sql)
+            region_rows = sqlite_client.execute_query(region_sql)
         except Exception:
             region_rows = []
 
-        ref_rows = mysql_client.execute_query(
+        ref_rows = sqlite_client.execute_query(
             "SELECT MAX(order_date) AS max_dt, MIN(order_date) AS min_dt "
             "FROM orders WHERE order_status = 'Completed'"
         )
@@ -575,7 +574,7 @@ class AgentLoopOrchestrator:
             return self._build_t2_trend(tables)
 
         start_date, end_date = self._get_date_range()
-        prev_start_rows = mysql_client.execute_query(
+        prev_start_rows = sqlite_client.execute_query(
             f"SELECT DATE_FORMAT(DATE_SUB('{start_date}', INTERVAL 6 MONTH), '%Y-%m-%d') AS prev_start"
         )
         prev_start = str(prev_start_rows[0]["prev_start"])[:10]
@@ -588,7 +587,7 @@ class AgentLoopOrchestrator:
         WHERE o.order_status = 'Completed'
           AND o.order_date >= '{prev_start}' AND o.order_date <= '{end_date}'
         """
-        period = mysql_client.execute_query(period_sql)[0]
+        period = sqlite_client.execute_query(period_sql)[0]
 
         dim_sql = "p.category"
         join_products = ""
@@ -612,7 +611,7 @@ class AgentLoopOrchestrator:
         GROUP BY {dim_sql}
         ORDER BY (curr_sales - prev_sales) ASC
         """
-        detail_rows = mysql_client.execute_query(contrib_sql)
+        detail_rows = sqlite_client.execute_query(contrib_sql)
         for row in detail_rows:
             row["delta"] = float(row.get("curr_sales") or 0) - float(row.get("prev_sales") or 0)
 

@@ -1,4 +1,4 @@
-"""Agent-Loop Web 产品 FastAPI 后端。"""
+"""Agent-Loop Web 产品 FastAPI 后端（通用模型 + SQLite 版）。"""
 
 from __future__ import annotations
 
@@ -12,24 +12,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-# Python 3.11 兼容：cursor-sdk 需要 os.get_blocking (3.12+)
-if not hasattr(os, "get_blocking"):
-
-    def _get_blocking(fd: int) -> bool:
-        try:
-            import msvcrt  # Windows
-            return bool(msvcrt.get_osfhandle(fd))
-        except ImportError:
-            import fcntl  # Unix
-            return not bool(fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_NONBLOCK)
-        except Exception:
-            return True
-
-    os.get_blocking = _get_blocking  # type: ignore[attr-defined]
-
-if not hasattr(os, "set_blocking"):
-    os.set_blocking = lambda fd, blocking: None  # type: ignore[attr-defined]
-
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -42,27 +24,30 @@ os.environ["TASK_BOARD_DIR"] = str(BOARDS_DIR)
 sys.path.insert(0, str(ROOT / "src" / "mcp"))
 sys.path.insert(0, str(ROOT / "src"))
 
-from core.config_store import apply_config, load_config, public_config, save_config  # noqa: E402
-from core.cursor_config import (  # noqa: E402
-    get_api_key,
-    public_config as public_cursor_config,
-    save_config as save_cursor_config,
-)
+from core import sqlite_client  # noqa: E402
 from core.intent import (  # noqa: E402
     DDL_BLOCKED_MESSAGE,
     classify_info_query,
     classify_intent,
     is_ddl_request,
 )
-from core import mysql_client  # noqa: E402
-from web.cursor_orchestrator import CursorAgentLoopOrchestrator  # noqa: E402
-from web.orchestrator import PHASE_LABELS, derive_phase, extract_report  # noqa: E402
+from core.llm_client import chat_completion, test_api_connection  # noqa: E402
+from core.model_config import (  # noqa: E402
+    public_config,
+    save_config,
+    get_api_key,
+)  # noqa: E402
+from web.orchestrator import (  # noqa: E402
+    PHASE_LABELS,
+    AgentLoopOrchestrator,
+    derive_phase,
+    extract_report,
+)
 import task_board_server as board  # noqa: E402
 
 STATIC_DIR = ROOT / "web" / "static"
-apply_config(load_config())
 
-app = FastAPI(title="Agent-Loop 数据分析", version="0.2.1")
+app = FastAPI(title="AI Agent 数据分析", version="0.3.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -79,18 +64,12 @@ class AnalyzeRequest(BaseModel):
     question: str = Field(..., min_length=2, max_length=500)
 
 
-class MysqlConfigRequest(BaseModel):
-    host: str = "localhost"
-    port: int = 3306
-    user: str = "root"
-    password: str = ""
-    database: str = "mysql_dataset_test"
-    allow_writes: bool = False
-
-
-class CursorConfigRequest(BaseModel):
+class ModelConfigRequest(BaseModel):
     api_key: str = ""
-    model: str = "composer-2.5"
+    model: str = "gpt-4o"
+    api_base: str = "https://api.openai.com/v1"
+    temperature: float = 0.7
+    max_tokens: int = 4096
 
 
 def _board_path(board_id: str) -> Path:
@@ -180,7 +159,7 @@ def _run_info_query(question: str, board_id: str) -> dict[str, Any]:
     info_type, table_name = classify_info_query(question)
     try:
         if info_type == "list_tables":
-            tables = mysql_client.list_tables()
+            tables = sqlite_client.list_tables()
             lines = "\n".join(f"- `{t}`" for t in tables)
             report = (
                 f"## 1. 分析概要\n\n"
@@ -189,12 +168,12 @@ def _run_info_query(question: str, board_id: str) -> dict[str, Any]:
                 f"## 3. 说明\n\n如需查看某张表的字段结构，请输入「XX表有哪些字段」。"
             )
         elif info_type == "describe_table":
-            columns = mysql_client.describe_table(table_name)
-            header = "| 字段名 | 类型 | 是否可空 | 键 | 默认值 | 额外信息 |"
-            sep = "|------|------|--------|---|------|--------|"
+            columns = sqlite_client.describe_table(table_name)
+            header = "| 字段名 | 类型 | 是否可空 | 键 | 默认值 |"
+            sep = "|------|------|--------|---|------|"
             rows = "\n".join(
                 f"| {c['Field']} | {c['Type']} | {c['Null']} | {c['Key']} | "
-                f"{c['Default'] or ''} | {c.get('Extra', '')} |"
+                f"{c['Default'] or ''} |"
                 for c in columns
             )
             report = (
@@ -225,31 +204,19 @@ def _run_info_query(question: str, board_id: str) -> dict[str, Any]:
 
 
 def _run_general_chat(question: str) -> str:
-    """调用 Cursor SDK 通用模型回答非分析类问题（阻塞调用，需在线程中执行）。"""
-    from cursor_sdk import Agent, AgentOptions, LocalAgentOptions, SendOptions
-    from core.cursor_config import get_api_key, get_model
+    """调用通用 LLM 回答非分析类问题（阻塞调用，需在线程中执行）。"""
     api_key = get_api_key()
     if not api_key:
-        return "当前未配置 Cursor API Key，无法回答通用问题。请先在管理员配置中填写。"
-    prompt = (
-        "你是数据分析助手。用户提出以下问题（非数据分析类），请用中文给出简洁、友好的回答。\n\n"
-        f"用户问题：{question}"
-    )
-    with Agent.create(
-        AgentOptions(
-            api_key=api_key,
-            model=get_model(),
-            local=LocalAgentOptions(cwd=str(ROOT)),
-        )
-    ) as agent:
-        result = agent.send(prompt, SendOptions())
-        text = ""
-        for msg in result.messages():
-            if getattr(msg, "type", "") == "assistant":
-                for block in getattr(msg.message, "content", []):
-                    if getattr(block, "type", "") == "text":
-                        text += getattr(block, "text", "")
-        return text.strip() or "抱歉，暂时无法回答这个问题。"
+        return "当前未配置 API Key，无法回答通用问题。请先在管理员配置中填写。"
+    system_prompt = "你是数据分析助手。用户提出以下问题（非数据分析类），请用中文给出简洁、友好的回答。"
+    try:
+        reply = chat_completion([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": question},
+        ])
+        return reply or "抱歉，暂时无法回答这个问题。"
+    except Exception as exc:
+        return f"抱歉，无法获取回答：{exc}"
 
 
 def _run_analysis(board_id: str, question: str) -> None:
@@ -265,8 +232,8 @@ def _run_analysis(board_id: str, question: str) -> None:
 
     try:
         if not get_api_key():
-            raise RuntimeError("未配置 CURSOR_API_KEY。请在管理员配置中填写 Cursor API Key。")
-        orchestrator = CursorAgentLoopOrchestrator(on_progress=on_progress)
+            raise RuntimeError("未配置 API Key。请在管理员配置中填写。")
+        orchestrator = AgentLoopOrchestrator(on_progress=on_progress)
         result = orchestrator.run(question, board_id=board_id)
         _set_job(
             board_id,
@@ -303,8 +270,8 @@ async def health():
     return {
         "status": "ok",
         "service": "agent-loop-web",
-        "cursor_api_key_set": bool(get_api_key()),
-        "engine": "cursor-sdk",
+        "api_key_set": bool(get_api_key()),
+        "engine": "generic-llm",
         "boards_dir": str(BOARDS_DIR),
     }
 
@@ -315,7 +282,7 @@ async def start_analyze(req: AnalyzeRequest, background_tasks: BackgroundTasks):
     if not question:
         raise HTTPException(400, "问题不能为空")
 
-    # ── DDL / 写操作：固定拒绝，禁止调用 Agent 或模型 ──
+    # ── DDL / 写操作：固定拒绝 ──
     if is_ddl_request(question):
         board_id = _create_board(question)
         _set_job(
@@ -341,10 +308,9 @@ async def start_analyze(req: AnalyzeRequest, background_tasks: BackgroundTasks):
             "verify_summary": DDL_BLOCKED_MESSAGE,
         }
 
-    # ── 信息查询：直连 MySQL，不走 agent-loop ──
+    # ── 信息查询：直连 SQLite，不走 agent-loop ──
     info_type, table_name = classify_info_query(question)
     if info_type:
-        apply_config(load_config())
         board_id = _create_board(question)
         result = _run_info_query(question, board_id)
         _set_job(
@@ -365,7 +331,7 @@ async def start_analyze(req: AnalyzeRequest, background_tasks: BackgroundTasks):
             **result,
         }
 
-    # ── 非分析类问题：调用 Cursor SDK 通用回答（不走 agent-loop） ──
+    # ── 非分析类问题：调用通用 LLM 回答 ──
     analysis_type = classify_intent(question)
     if analysis_type is None:
         board_id = _create_board(question)
@@ -390,7 +356,7 @@ async def start_analyze(req: AnalyzeRequest, background_tasks: BackgroundTasks):
     if not get_api_key():
         raise HTTPException(
             400,
-            "未配置 CURSOR_API_KEY。请点击右上角「管理员配置」填写 Cursor API Key。",
+            "未配置 API Key。请点击右上角「管理员配置」填写。",
         )
 
     board_id = _create_board(question)
@@ -400,7 +366,7 @@ async def start_analyze(req: AnalyzeRequest, background_tasks: BackgroundTasks):
         phase="planning",
         phase_label=PHASE_LABELS["planning"],
         status="running",
-        detail="正在启动 Cursor Agent…",
+        detail="正在启动 Agent…",
     )
     background_tasks.add_task(_run_analysis, board_id, question)
 
@@ -430,10 +396,8 @@ async def analyze_sync(req: AnalyzeRequest):
             "verify_summary": DDL_BLOCKED_MESSAGE,
         }
 
-    # ── 信息查询：直连 MySQL，不走 agent-loop ──
     info_type, table_name = classify_info_query(question)
     if info_type:
-        apply_config(load_config())
         board_id = _create_board(question)
         result = _run_info_query(question, board_id)
         return {"board_id": board_id, "direct": True, **result}
@@ -453,14 +417,14 @@ async def analyze_sync(req: AnalyzeRequest):
                 "report": report, "verify_summary": "通用问题已回答。"}
 
     if not get_api_key():
-        raise HTTPException(400, "未配置 CURSOR_API_KEY")
+        raise HTTPException(400, "未配置 API Key")
 
     board_id = _create_board(question)
     loop = asyncio.get_event_loop()
     try:
         result = await loop.run_in_executor(
             None,
-            lambda: CursorAgentLoopOrchestrator().run(question, board_id=board_id),
+            lambda: AgentLoopOrchestrator().run(question, board_id=board_id),
         )
     except RuntimeError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -583,53 +547,35 @@ async def delete_analysis(board_id: str):
     return {"message": "已删除", "board_id": board_id}
 
 
-@app.get("/api/admin/mysql-config")
-async def get_mysql_config():
+@app.get("/api/admin/model-config")
+async def get_model_config():
     return public_config()
 
 
-@app.put("/api/admin/mysql-config")
-async def update_mysql_config(req: MysqlConfigRequest):
+@app.put("/api/admin/model-config")
+async def update_model_config(req: ModelConfigRequest):
     saved = save_config(req.model_dump())
-    return {"message": "MySQL 配置已保存", "config": public_config(saved)}
+    return {"message": "模型配置已保存", "config": public_config(saved)}
 
 
 @app.post("/api/admin/test-connection")
-async def test_mysql_connection(req: MysqlConfigRequest | None = None):
-    if req:
-        save_config(req.model_dump())
-    else:
-        apply_config(load_config())
+async def test_db_connection():
     try:
-        return mysql_client.test_connection()
+        return sqlite_client.test_connection()
     except Exception as exc:
         raise HTTPException(400, f"连接失败: {exc}") from exc
 
 
-@app.get("/api/admin/cursor-config")
-async def get_cursor_config():
-    return public_cursor_config()
-
-
-@app.put("/api/admin/cursor-config")
-async def update_cursor_config(req: CursorConfigRequest):
-    saved = save_cursor_config(req.model_dump())
-    return {"message": "Cursor 配置已保存", "config": public_cursor_config(saved)}
-
-
-@app.post("/api/admin/test-cursor-key")
-async def test_cursor_key(req: CursorConfigRequest | None = None):
-    """测试 Cursor API Key 是否有效。"""
+@app.post("/api/admin/test-api-key")
+async def test_api_key(req: ModelConfigRequest | None = None):
     if req and req.api_key:
-        save_cursor_config(req.model_dump())
-    from core.cursor_config import get_api_key, get_model
+        save_config(req.model_dump())
     key = get_api_key()
     if not key:
         raise HTTPException(400, "未配置 API Key")
     try:
-        from cursor_sdk import Cursor
-        models = Cursor.models.list() if hasattr(Cursor, "models") else []
-        return {"status": "ok", "message": f"API Key 有效（{len(models)} 个模型可用）", "model_count": len(models)}
+        result = test_api_connection()
+        return result
     except Exception as exc:
         raise HTTPException(400, f"API Key 无效或连接失败: {exc}") from exc
 
