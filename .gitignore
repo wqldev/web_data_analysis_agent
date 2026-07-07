@@ -5,10 +5,6 @@ data/cursor_config.json
 .env
 .env.*
 
-# ===== 数据库 =====
-data/*.db
-data/*.db-*
-
 # ===== Python 虚拟环境 =====
 .venv/
 venv/
