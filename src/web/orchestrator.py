@@ -312,10 +312,14 @@ class AgentLoopOrchestrator:
             today = datetime.now().strftime("%Y-%m-%d")
             return today, today
         max_date = str(rows[0]["max_date"])[:10]
-        start_rows = sqlite_client.execute_query(
-            f"SELECT DATE_FORMAT(DATE_SUB('{max_date}', INTERVAL 6 MONTH), '%Y-%m-%d') AS start_date"
-        )
-        start_date = str(start_rows[0]["start_date"])[:10]
+        # 用 Python 计算 6 个月前（替代 MySQL DATE_SUB + DATE_FORMAT）
+        dt = datetime.strptime(max_date, "%Y-%m-%d")
+        month = dt.month - 6
+        year = dt.year
+        if month <= 0:
+            month += 12
+            year -= 1
+        start_date = datetime(year, month, dt.day).strftime("%Y-%m-%d")
         return start_date, max_date
 
     def _build_t2(self, analysis_type: AnalysisType, tables: list[str]) -> tuple[dict[str, Any], str]:
@@ -354,22 +358,29 @@ class AgentLoopOrchestrator:
         kpi = kpi_rows[0] if kpi_rows else {}
 
         detail_sql = f"""
-        SELECT DATE_FORMAT(o.order_date, '%Y-%m') AS month,
+        SELECT strftime('%Y-%m', o.order_date) AS month,
           COUNT(DISTINCT o.order_id) AS order_count,
           COALESCE(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 0) AS sales_amt
         FROM orders o
         JOIN order_items oi ON o.order_id = oi.order_id
         WHERE {base_filter}
-        GROUP BY DATE_FORMAT(o.order_date, '%Y-%m')
+        GROUP BY strftime('%Y-%m', o.order_date)
         ORDER BY month
         """
         detail_rows = sqlite_client.execute_query(detail_sql)
         detail_label = "月度趋势"
 
-        prev_start_rows = sqlite_client.execute_query(
-            f"SELECT DATE_FORMAT(DATE_SUB('{start_date}', INTERVAL 6 MONTH), '%Y-%m-%d') AS prev_start"
-        )
-        prev_start = str(prev_start_rows[0]["prev_start"])[:10]
+        # 用 Python 计算去年同期
+        dt = datetime.strptime(start_date, "%Y-%m-%d")
+        month = dt.month - 6
+        year = dt.year
+        if month <= 0:
+            month += 12
+            year -= 1
+        try:
+            prev_start = datetime(year, month, dt.day).strftime("%Y-%m-%d")
+        except ValueError:
+            prev_start = datetime(year, month, 1).strftime("%Y-%m-%d")
         prev_sql = f"""
         SELECT COALESCE(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 0) AS prev_sales,
           COUNT(DISTINCT o.order_id) AS prev_orders
@@ -477,9 +488,9 @@ class AgentLoopOrchestrator:
           SELECT c.customer_id, c.customer_name, c.region, c.industry,
             COUNT(DISTINCT o.order_id) AS total_orders,
             MAX(o.order_date) AS last_order_date,
-            DATEDIFF(r.max_dt, MAX(o.order_date)) AS days_since_last,
+            CAST(julianday(r.max_dt) - julianday(MAX(o.order_date)) AS INTEGER) AS days_since_last,
             {ltv_expr} AS lifetime_value,
-            SUM(CASE WHEN o.order_date >= DATE_SUB(r.max_dt, INTERVAL 3 MONTH) THEN 1 ELSE 0 END) AS orders_last_3m
+            SUM(CASE WHEN o.order_date >= date(r.max_dt, '-3 months') THEN 1 ELSE 0 END) AS orders_last_3m
           FROM customers c
           CROSS JOIN ref r
           LEFT JOIN orders o ON c.customer_id = o.customer_id AND o.order_status = 'Completed'
@@ -507,8 +518,8 @@ class AgentLoopOrchestrator:
         cust AS (
           SELECT c.region,
             COUNT(*) AS customer_count,
-            SUM(CASE WHEN COALESCE(DATEDIFF(r.max_dt, MAX(o.order_date)), 999) >= 90
-              AND SUM(CASE WHEN o.order_date >= DATE_SUB(r.max_dt, INTERVAL 3 MONTH) THEN 1 ELSE 0 END) = 0
+            SUM(CASE WHEN COALESCE(CAST(julianday(r.max_dt) - julianday(MAX(o.order_date)) AS INTEGER), 999) >= 90
+              AND SUM(CASE WHEN o.order_date >= date(r.max_dt, '-3 months') THEN 1 ELSE 0 END) = 0
               AND COUNT(DISTINCT o.order_id) > 0 THEN 1 ELSE 0 END) AS high_risk_count
           FROM customers c
           CROSS JOIN ref r
@@ -574,10 +585,17 @@ class AgentLoopOrchestrator:
             return self._build_t2_trend(tables)
 
         start_date, end_date = self._get_date_range()
-        prev_start_rows = sqlite_client.execute_query(
-            f"SELECT DATE_FORMAT(DATE_SUB('{start_date}', INTERVAL 6 MONTH), '%Y-%m-%d') AS prev_start"
-        )
-        prev_start = str(prev_start_rows[0]["prev_start"])[:10]
+        dt = datetime.strptime(start_date, "%Y-%m-%d")
+        prev_months = 6
+        prev_month = dt.month - prev_months
+        prev_year = dt.year
+        if prev_month <= 0:
+            prev_month += 12
+            prev_year -= 1
+        try:
+            prev_start = datetime(prev_year, prev_month, dt.day).strftime("%Y-%m-%d")
+        except ValueError:
+            prev_start = datetime(prev_year, prev_month, 1).strftime("%Y-%m-%d")
 
         period_sql = f"""
         SELECT
