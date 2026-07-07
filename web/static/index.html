@@ -14,7 +14,7 @@
         <span class="logo">◈</span>
         <div>
           <h1>AI Agent 数据分析</h1>
-          <p class="subtitle">配置数据库 API key, 输入问题, 开始分析</p>
+          <p class="subtitle">配置 API key, 输入问题, 开始分析</p>
         </div>
       </div>
       <button id="adminBtn" class="btn btn-ghost" type="button">管理员配置</button>
@@ -90,34 +90,24 @@
 
   <dialog id="adminDialog" class="admin-dialog">
     <form id="adminForm" method="dialog">
-      <h2>MySQL 连接配置</h2>
-      <div class="form-grid">
-        <label>主机 <input name="host" type="text" required /></label>
-        <label>端口 <input name="port" type="number" required /></label>
-        <label>用户名 <input name="user" type="text" required /></label>
-        <label>密码 <input name="password" type="password" placeholder="留空则保持原密码" /></label>
-        <label class="span-2">数据库 <input name="database" type="text" required /></label>
-        <label class="checkbox span-2">
-          <input name="allow_writes" type="checkbox" />
-          允许写操作（默认只读）
-        </label>
-      </div>
-      <h2 class="admin-section-title">Cursor Agent 配置</h2>
+      <h2>模型配置</h2>
       <p class="admin-hint">
-        Web 端通过 Cursor SDK 调用与 IDE 相同的 planner / builder / verifier 闭环。
-        需在 <a href="https://cursor.com/settings" target="_blank" rel="noopener">cursor.com/settings</a> 创建 API Key 后粘贴到下方。
+        配置 OpenAI 兼容的 API 服务，支持任何兼容的 LLM 提供商（如 OpenAI、DeepSeek、通义千问等）。
       </p>
       <div class="form-grid">
-        <label class="span-2">Cursor API Key
-          <input name="cursor_api_key" type="password" placeholder="留空则保持原 Key" autocomplete="off" />
+        <label class="span-2">API 地址
+          <input name="api_base" type="text" value="https://api.openai.com/v1" placeholder="https://api.openai.com/v1" />
         </label>
-        <label class="span-2">模型
-          <input name="cursor_model" type="text" value="composer-2.5" placeholder="composer-2.5" />
+        <label class="span-2">API Key
+          <input name="api_key" type="password" placeholder="留空则保持原 Key" autocomplete="off" />
+        </label>
+        <label class="span-2">模型名称
+          <input name="model" type="text" value="gpt-4o" placeholder="gpt-4o" />
         </label>
       </div>
       <div class="dialog-actions">
-        <button type="button" id="testConnBtn" class="btn btn-ghost">测试 MySQL</button>
-        <button type="button" id="testKeyBtn" class="btn btn-ghost">测试 API Key</button>
+        <button type="button" id="testConnBtn" class="btn btn-ghost">测试数据库</button>
+        <button type="button" id="testKeyBtn" class="btn btn-ghost">测试 API</button>
         <button type="button" id="cancelAdmin" class="btn btn-ghost">取消</button>
         <button type="submit" class="btn btn-primary">保存</button>
       </div>

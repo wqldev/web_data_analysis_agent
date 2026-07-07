@@ -1,0 +1,42 @@
+# ===== 敏感配置（含 API Key / 密码） =====
+data/model_config.json
+data/mysql_config.json
+data/cursor_config.json
+.env
+.env.*
+
+# ===== 数据库 =====
+data/*.db
+data/*.db-*
+
+# ===== Python 虚拟环境 =====
+.venv/
+venv/
+env/
+
+# ===== Python 缓存 =====
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# ===== IDE / 编辑器 =====
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.cursor/
+
+# ===== 运行时数据 =====
+boards/
+reports/
+graphify-out/
+.codegraph/
+
+# ===== 操作系统 =====
+.DS_Store
+Thumbs.db

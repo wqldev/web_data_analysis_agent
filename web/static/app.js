@@ -92,7 +92,7 @@ function showLoading() {
   reportPanel.classList.add("hidden");
   progressPanel.classList.remove("hidden");
   setProgressPhase("planning");
-  progressDetail.textContent = "正在启动 Cursor Agent…";
+  progressDetail.textContent = "正在启动 Agent…";
 }
 
 function hideLoading() {
@@ -306,59 +306,39 @@ async function submitQuestion() {
     hideLoading();
     emptyState.classList.remove("hidden");
     submitBtn.disabled = false;
-    alert(err.message || "请先在管理员配置中填写 Cursor API Key 和 MySQL 连接");
+    alert(err.message || "请先在管理员配置中填写 API Key");
   }
 }
 
 async function loadAdminConfig() {
-  const [mysqlRes, cursorRes] = await Promise.all([
-    fetch(`${API}/admin/mysql-config`),
-    fetch(`${API}/admin/cursor-config`),
+  const [modelRes] = await Promise.all([
+    fetch(`${API}/admin/model-config`),
   ]);
-  const cfg = await mysqlRes.json();
-  const cursor = await cursorRes.json();
-  adminForm.host.value = cfg.host || "localhost";
-  adminForm.port.value = cfg.port || 3306;
-  adminForm.user.value = cfg.user || "root";
-  adminForm.password.value = "";
-  adminForm.database.value = cfg.database || "";
-  adminForm.allow_writes.checked = !!cfg.allow_writes;
-  adminForm.cursor_api_key.value = "";
-  adminForm.cursor_model.value = cursor.model || "composer-2.5";
+  const cfg = await modelRes.json();
+  adminForm.api_base.value = cfg.api_base || "https://api.openai.com/v1";
+  adminForm.model.value = cfg.model || "gpt-4o";
+  adminForm.api_key.value = "";
   const hints = [];
-  if (cfg.password_set) hints.push("MySQL 密码已配置");
-  if (cursor.api_key_set) hints.push("Cursor API Key 已配置");
-  adminMsg.textContent = hints.join("；") || "请填写 MySQL 与 Cursor API Key";
+  if (cfg.api_key_set) hints.push("API Key 已配置");
+  adminMsg.textContent = hints.join("；") || "请填写 API 配置";
   adminMsg.className = "admin-msg";
 }
 
 async function saveAdminConfig(e) {
   e.preventDefault();
-  const mysqlPayload = {
-    host: adminForm.host.value,
-    port: Number(adminForm.port.value),
-    user: adminForm.user.value,
-    password: adminForm.password.value,
-    database: adminForm.database.value,
-    allow_writes: adminForm.allow_writes.checked,
+  const modelPayload = {
+    api_base: adminForm.api_base.value,
+    model: adminForm.model.value,
+    api_key: adminForm.api_key.value,
   };
-  const cursorPayload = {
-    api_key: adminForm.cursor_api_key.value,
-    model: adminForm.cursor_model.value || "composer-2.5",
-  };
-  const [mysqlRes, cursorRes] = await Promise.all([
-    fetch(`${API}/admin/mysql-config`, {
+  const [modelRes] = await Promise.all([
+    fetch(`${API}/admin/model-config`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(mysqlPayload),
-    }),
-    fetch(`${API}/admin/cursor-config`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(cursorPayload),
+      body: JSON.stringify(modelPayload),
     }),
   ]);
-  if (!mysqlRes.ok || !cursorRes.ok) {
+  if (!modelRes.ok) {
     adminMsg.textContent = "保存失败，请检查输入";
     adminMsg.className = "admin-msg err";
     return;
@@ -369,25 +349,15 @@ async function saveAdminConfig(e) {
 }
 
 async function testConnection() {
-  const payload = {
-    host: adminForm.host.value,
-    port: Number(adminForm.port.value),
-    user: adminForm.user.value,
-    password: adminForm.password.value,
-    database: adminForm.database.value,
-    allow_writes: adminForm.allow_writes.checked,
-  };
   adminMsg.textContent = "测试中…";
   adminMsg.className = "admin-msg";
   try {
     const res = await fetch(`${API}/admin/test-connection`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "连接失败");
-    adminMsg.textContent = `${data.message}（${data.version} / ${data.current_database}）`;
+    adminMsg.textContent = `${data.message}（${data.version} / ${data.database}）`;
     adminMsg.className = "admin-msg ok";
   } catch (err) {
     adminMsg.textContent = err.message;
@@ -395,15 +365,16 @@ async function testConnection() {
   }
 }
 
-async function testCursorKey() {
+async function testApiKey() {
   const payload = {
-    api_key: adminForm.cursor_api_key.value || undefined,
-    model: adminForm.cursor_model.value || "composer-2.5",
+    api_key: adminForm.api_key.value || undefined,
+    model: adminForm.model.value || "gpt-4o",
+    api_base: adminForm.api_base.value || "https://api.openai.com/v1",
   };
   adminMsg.textContent = "测试中…";
   adminMsg.className = "admin-msg";
   try {
-    const res = await fetch(`${API}/admin/test-cursor-key`, {
+    const res = await fetch(`${API}/admin/test-api-key`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -430,7 +401,7 @@ adminBtn.addEventListener("click", async () => {
 cancelAdmin.addEventListener("click", () => adminDialog.close());
 adminForm.addEventListener("submit", saveAdminConfig);
 testConnBtn.addEventListener("click", testConnection);
-testKeyBtn.addEventListener("click", testCursorKey);
+testKeyBtn.addEventListener("click", testApiKey);
 clearGeneralAnswer.addEventListener("click", () => {
   generalAnswer.classList.add("hidden");
 });
