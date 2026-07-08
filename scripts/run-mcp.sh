@@ -20,5 +20,5 @@ for cmd in "py -3" python3 python; do
   fi
 done
 
-echo "[my_first_agent] MCP 启动失败：未找到 Python。请运行 ./scripts/setup.sh" >&2
+echo "[web_data_analysis_agent] MCP 启动失败：未找到 Python。请运行 ./scripts/setup.sh" >&2
 exit 1

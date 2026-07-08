@@ -1,4 +1,4 @@
-# my_first_agent
+# web_data_analysis_agent
 
 基于 Cursor 的**三 Agent 协作数据分析**项目：主 Agent 调度 `planner-agent` → `builder-agent` → `verifier-agent`，通过 `task-board` MCP 跟踪任务状态，通过 `mysql-local` MCP 只读取数，形成可验收的 agent-loop 闭环。
 
@@ -202,7 +202,7 @@ python src/bootstrap/setup.py
 ## 项目结构
 
 ```
-my_first_agent/
+web_data_analysis_agent/
 ├── .cursor/
 │   ├── agents/              # planner / builder / verifier
 │   ├── hooks/               # Hook 脚本与 logs/

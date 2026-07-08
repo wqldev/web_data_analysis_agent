@@ -24,5 +24,5 @@ if !errorlevel! equ 0 (
   exit /b !errorlevel!
 )
 
-echo [my_first_agent] MCP 启动失败：未找到 Python。请运行 scripts\setup.ps1 1>&2
+echo [web_data_analysis_agent] MCP 启动失败：未找到 Python。请运行 scripts\setup.ps1 1>&2
 exit /b 1

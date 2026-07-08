@@ -3,7 +3,7 @@
 **版本**：1.0  
 **最后更新**：2026-07-06  
 
-本文档描述 `my_first_agent` 中 planner / builder / verifier 三 Subagent 的职责边界、输入输出格式、MCP 工具契约及失败处理策略。主 Agent 调度逻辑见 `.cursor/skills/agent-loop/SKILL.md`。
+本文档描述 `web_data_analysis_agent` 中 planner / builder / verifier 三 Subagent 的职责边界、输入输出格式、MCP 工具契约及失败处理策略。主 Agent 调度逻辑见 `.cursor/skills/agent-loop/SKILL.md`。
 
 ---
 

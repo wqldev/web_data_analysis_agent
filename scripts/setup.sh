@@ -7,7 +7,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 
-echo "== my_first_agent 环境初始化 =="
+echo "== web_data_analysis_agent 环境初始化 =="
 echo "项目根目录: ${ROOT}"
 
 find_python() {

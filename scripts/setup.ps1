@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
-Write-Host "== my_first_agent 环境初始化 ==" -ForegroundColor Cyan
+Write-Host "== web_data_analysis_agent 环境初始化 ==" -ForegroundColor Cyan
 Write-Host "项目根目录: $Root"
 
 function Test-Python310 {
