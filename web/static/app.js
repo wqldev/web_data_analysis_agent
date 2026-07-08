@@ -202,7 +202,8 @@ async function loadReport(boardId) {
 
 function pollStatus(boardId, question) {
   clearInterval(pollTimer);
-  pollTimer = setInterval(async () => {
+
+  const pollOnce = async () => {
     try {
       const res = await fetch(`${API}/analyze/${boardId}/status`);
       const data = await res.json();
@@ -251,7 +252,10 @@ function pollStatus(boardId, question) {
       submitBtn.disabled = false;
       alert(err.message || "轮询失败");
     }
-  }, 2500);
+  };
+
+  pollOnce();
+  pollTimer = setInterval(pollOnce, 800);
 }
 
 async function submitQuestion() {

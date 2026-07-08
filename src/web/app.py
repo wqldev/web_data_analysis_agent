@@ -267,11 +267,15 @@ async def index():
 
 @app.get("/api/health")
 async def health():
+    from core.model_config import get_model, get_api_base  # noqa: E402
+
     return {
         "status": "ok",
         "service": "agent-loop-web",
         "api_key_set": bool(get_api_key()),
-        "engine": "generic-llm",
+        "engine": "llm-agent-loop",
+        "model": get_model(),
+        "api_base": get_api_base(),
         "boards_dir": str(BOARDS_DIR),
     }
 

@@ -225,13 +225,15 @@ my_first_agent/
 │   └── run-mcp.sh
 ├── src/
 │   ├── bootstrap/           # 虚拟环境自举逻辑
-│   ├── core/                # 配置、MySQL、意图识别
-│   ├── web/                 # FastAPI + agent-loop 编排器
+│   ├── core/                # 模型配置、SQLite、意图识别
+│   ├── web/                 # FastAPI + LLM 编排器
+│   │   ├── app.py
+│   │   ├── orchestrator.py
+│   │   └── llm_agents.py
 │   └── mcp/
 │       ├── task_board_server.py
 │       ├── server.py
 │       ├── launcher.py
-│       ├── run.py
 │       ├── requirements.txt
 │       ├── test_task_board.py
 │       └── test_integration_d13.py
